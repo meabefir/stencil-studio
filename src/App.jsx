@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 const PAPER_SIZES = [
   { id: "a3", label: "A3", width: 297, height: 420 },
@@ -444,138 +444,83 @@ function RangeField({ label, value, unit = "", min, max, step = 1, onChange }) {
 }
 
 function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) {
-  const [scrubReady, setScrubReady] = useState(false);
-  const [scrubbing, setScrubbing] = useState(false);
-  const hoverTimerRef = useRef(null);
-  const touchHoldTimerRef = useRef(null);
-  const touchPressRef = useRef(null);
+  const inputId = useId();
+  const [isAdjusting, setIsAdjusting] = useState(false);
+  const [usesCoarsePointer, setUsesCoarsePointer] = useState(() => (
+    typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches
+  ));
   const dragRef = useRef(null);
 
-  useEffect(() => () => {
-    window.clearTimeout(hoverTimerRef.current);
-    window.clearTimeout(touchHoldTimerRef.current);
+  useEffect(() => {
+    const query = window.matchMedia?.("(pointer: coarse)");
+    if (!query) return undefined;
+    const updatePointerMode = () => setUsesCoarsePointer(query.matches);
+    updatePointerMode();
+    query.addEventListener("change", updatePointerMode);
+    return () => query.removeEventListener("change", updatePointerMode);
   }, []);
 
-  const clearTouchPress = (pointerId) => {
-    const touchPress = touchPressRef.current;
-    if (!touchPress || (pointerId !== undefined && touchPress.pointerId !== pointerId)) return null;
-    window.clearTimeout(touchHoldTimerRef.current);
-    touchPressRef.current = null;
-    return touchPress;
-  };
-
-  const startHover = (event) => {
-    if (event.pointerType !== "mouse") return;
-    window.clearTimeout(hoverTimerRef.current);
-    hoverTimerRef.current = window.setTimeout(() => setScrubReady(true), 500);
-  };
-
-  const stopHover = (event) => {
-    if (event.pointerType !== "mouse") return;
-    window.clearTimeout(hoverTimerRef.current);
-    if (!dragRef.current) setScrubReady(false);
-  };
-
-  const startScrub = (event) => {
-    if (event.pointerType === "touch" || event.pointerType === "pen") {
-      const pointerId = event.pointerId;
-      const target = event.currentTarget;
-      clearTouchPress();
-      target.setPointerCapture(pointerId);
-      touchPressRef.current = {
-        pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        startValue: value,
-        armed: false,
-        target,
-      };
-      touchHoldTimerRef.current = window.setTimeout(() => {
-        const touchPress = touchPressRef.current;
-        if (!touchPress || touchPress.pointerId !== pointerId) return;
-        touchPress.armed = true;
-        target.blur();
-        setScrubReady(true);
-      }, 500);
-      return;
-    }
-
-    if (!scrubReady) return;
+  const startAdjust = (event) => {
     event.preventDefault();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startValue: value };
-    setScrubbing(true);
+    dragRef.current = { pointerId: event.pointerId, startY: event.clientY, startValue: value };
+    setIsAdjusting(true);
   };
 
-  const moveScrub = (event) => {
-    const touchPress = touchPressRef.current;
-    if (touchPress?.pointerId === event.pointerId) {
-      if (!touchPress.armed) {
-        const moved = Math.abs(event.clientX - touchPress.startX) > 8 || Math.abs(event.clientY - touchPress.startY) > 8;
-        if (moved) {
-          clearTouchPress(event.pointerId);
-          setScrubReady(false);
-        }
-        return;
-      }
-
-      event.preventDefault();
-      if (!dragRef.current) {
-        dragRef.current = {
-          pointerId: event.pointerId,
-          startX: touchPress.startX,
-          startValue: touchPress.startValue,
-        };
-        setScrubbing(true);
-      }
-    }
-
+  const moveAdjust = (event) => {
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
-    const raw = drag.startValue + ((event.clientX - drag.startX) / 18) * step;
+    event.preventDefault();
+    const raw = drag.startValue + ((drag.startY - event.clientY) / 28) * step;
     const decimals = Math.max(0, (String(step).split(".")[1] || "").length);
     const stepped = Math.round(raw / step) * step;
     onChange(clamp(Number(stepped.toFixed(decimals)), min, max));
   };
 
-  const stopScrub = (event) => {
-    const touchPress = clearTouchPress(event.pointerId);
+  const stopAdjust = (event) => {
     const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (drag?.pointerId === event.pointerId) {
-      dragRef.current = null;
-      setScrubbing(false);
-    }
-    if (touchPress) setScrubReady(false);
+    dragRef.current = null;
+    setIsAdjusting(false);
   };
 
   return (
-    <label className="number-field">
-      <span className="number-field-label"><span>{label}</span><small aria-hidden="true">hold ↔</small></span>
-      <span className={`number-input-wrap ${scrubReady ? "scrub-ready" : ""} ${scrubbing ? "scrubbing" : ""}`}>
+    <div className="number-field">
+      <span className="number-field-label"><label htmlFor={inputId}>{label}</label><small aria-hidden="true">drag ↕</small></span>
+      <span className={`number-input-wrap ${isAdjusting ? "adjusting" : ""}`}>
         <input
+          id={inputId}
           type="number"
           value={value}
           min={min}
           max={max}
           step={step}
+          readOnly={usesCoarsePointer}
+          inputMode={usesCoarsePointer ? "none" : "decimal"}
           onChange={(event) => {
             const next = Number(event.target.value);
             if (Number.isFinite(next)) onChange(clamp(next, min, max));
           }}
-          onPointerEnter={startHover}
-          onPointerLeave={stopHover}
-          onPointerDown={startScrub}
-          onPointerMove={moveScrub}
-          onPointerUp={stopScrub}
-          onPointerCancel={stopScrub}
-          title="Mouse: hover for half a second, then hold and drag horizontally. Touch: press and hold for half a second, then slide horizontally. Tap normally to type."
+          title={usesCoarsePointer ? "Use the adjacent adjust button: drag up to increase or down to decrease." : "Type a value, or use the adjacent adjust button."}
         />
         {unit && <em>{unit}</em>}
-        <span className="scrub-hint" aria-hidden="true">{scrubbing ? "Fine adjusting…" : "Hold + drag ↔"}</span>
+        <button
+          type="button"
+          className="adjust-button"
+          aria-label={`Adjust ${label}${unit ? ` in ${unit}` : ""}. Drag up to increase or down to decrease.`}
+          title="Drag up to increase. Drag down to decrease."
+          onPointerDown={startAdjust}
+          onPointerMove={moveAdjust}
+          onPointerUp={stopAdjust}
+          onPointerCancel={stopAdjust}
+        >
+          <span aria-hidden="true">↕</span>
+        </button>
+        <span className="adjust-hint" aria-hidden="true">Slide up to increase</span>
       </span>
-    </label>
+    </div>
   );
 }
 
