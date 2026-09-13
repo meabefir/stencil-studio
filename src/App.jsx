@@ -477,7 +477,7 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const raw = drag.startValue + ((drag.startY - event.clientY) / 12) * step;
+    const raw = drag.startValue + ((drag.startY - event.clientY) / 2.4) * step;
     const decimals = Math.max(0, (String(step).split(".")[1] || "").length);
     const stepped = Math.round(raw / step) * step;
     onChange(clamp(Number(stepped.toFixed(decimals)), min, max));
