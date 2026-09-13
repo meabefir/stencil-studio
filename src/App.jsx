@@ -47,6 +47,7 @@ const STORAGE_KEYS = {
   workspace: "stencil-studio.workspace.v1",
   presets: "stencil-studio.presets.v1",
 };
+const MAX_REPEATS = 500;
 
 const initialRows = [
   { id: "line-1", type: "line", ...COMMON_DEFAULTS, ...TYPE_DEFAULTS.line, rotationOffset: 8 },
@@ -228,7 +229,7 @@ function horizontalFootprint(row) {
   const height = elementHeight(row);
   if (["circle", "polygon", "star"].includes(row.type)) return Math.max(width, height) + row.thickness;
   let widest = 0;
-  for (let index = 0; index < 48; index += 1) {
+  for (let index = 0; index < 360; index += 1) {
     const angle = ((row.rotation + row.rotationOffset * index) * Math.PI) / 180;
     const projectedWidth = Math.abs(width * Math.cos(angle)) + Math.abs(height * Math.sin(angle));
     widest = Math.max(widest, projectedWidth);
@@ -257,7 +258,7 @@ function repeatStride(row) {
 function repeatCount(row, availableWidth) {
   const shapeWidth = horizontalFootprint(row);
   const stride = repeatStride(row);
-  return clamp(Math.floor((availableWidth - shapeWidth) / stride) + 1, 1, 48);
+  return clamp(Math.floor((availableWidth - shapeWidth) / stride) + 1, 1, MAX_REPEATS);
 }
 
 function typeMeta(type) {
