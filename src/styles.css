@@ -130,7 +130,7 @@ select, input[type="number"], input[type="text"] {
   transition: border-color .14s ease, box-shadow .14s ease;
 }
 select { appearance: none; padding: 9px 30px 9px 10px; background-image: linear-gradient(45deg, transparent 50%, #7f8694 50%), linear-gradient(135deg, #7f8694 50%, transparent 50%); background-position: calc(100% - 14px) 17px, calc(100% - 10px) 17px; background-size: 4px 4px, 4px 4px; background-repeat: no-repeat; }
-input[type="number"] { padding: 9px 39px 9px 10px; }
+input[type="number"] { padding: 9px 39px 9px 10px; touch-action: pan-y; }
 input[type="text"] { padding: 9px 10px; }
 select:focus, input[type="number"]:focus, input[type="text"]:focus { border-color: #7178ee; box-shadow: 0 0 0 3px rgba(113, 120, 238, .13); }
 

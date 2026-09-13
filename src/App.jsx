@@ -447,9 +447,22 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
   const [scrubReady, setScrubReady] = useState(false);
   const [scrubbing, setScrubbing] = useState(false);
   const hoverTimerRef = useRef(null);
+  const touchHoldTimerRef = useRef(null);
+  const touchPressRef = useRef(null);
   const dragRef = useRef(null);
 
-  useEffect(() => () => window.clearTimeout(hoverTimerRef.current), []);
+  useEffect(() => () => {
+    window.clearTimeout(hoverTimerRef.current);
+    window.clearTimeout(touchHoldTimerRef.current);
+  }, []);
+
+  const clearTouchPress = (pointerId) => {
+    const touchPress = touchPressRef.current;
+    if (!touchPress || (pointerId !== undefined && touchPress.pointerId !== pointerId)) return null;
+    window.clearTimeout(touchHoldTimerRef.current);
+    touchPressRef.current = null;
+    return touchPress;
+  };
 
   const startHover = (event) => {
     if (event.pointerType !== "mouse") return;
@@ -457,13 +470,37 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
     hoverTimerRef.current = window.setTimeout(() => setScrubReady(true), 500);
   };
 
-  const stopHover = () => {
+  const stopHover = (event) => {
+    if (event.pointerType !== "mouse") return;
     window.clearTimeout(hoverTimerRef.current);
     if (!dragRef.current) setScrubReady(false);
   };
 
   const startScrub = (event) => {
-    if (!scrubReady || event.pointerType === "touch") return;
+    if (event.pointerType === "touch" || event.pointerType === "pen") {
+      const pointerId = event.pointerId;
+      const target = event.currentTarget;
+      clearTouchPress();
+      target.setPointerCapture(pointerId);
+      touchPressRef.current = {
+        pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        startValue: value,
+        armed: false,
+        target,
+      };
+      touchHoldTimerRef.current = window.setTimeout(() => {
+        const touchPress = touchPressRef.current;
+        if (!touchPress || touchPress.pointerId !== pointerId) return;
+        touchPress.armed = true;
+        target.blur();
+        setScrubReady(true);
+      }, 500);
+      return;
+    }
+
+    if (!scrubReady) return;
     event.preventDefault();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -472,6 +509,28 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
   };
 
   const moveScrub = (event) => {
+    const touchPress = touchPressRef.current;
+    if (touchPress?.pointerId === event.pointerId) {
+      if (!touchPress.armed) {
+        const moved = Math.abs(event.clientX - touchPress.startX) > 8 || Math.abs(event.clientY - touchPress.startY) > 8;
+        if (moved) {
+          clearTouchPress(event.pointerId);
+          setScrubReady(false);
+        }
+        return;
+      }
+
+      event.preventDefault();
+      if (!dragRef.current) {
+        dragRef.current = {
+          pointerId: event.pointerId,
+          startX: touchPress.startX,
+          startValue: touchPress.startValue,
+        };
+        setScrubbing(true);
+      }
+    }
+
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const raw = drag.startValue + ((event.clientX - drag.startX) / 18) * step;
@@ -481,16 +540,19 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
   };
 
   const stopScrub = (event) => {
+    const touchPress = clearTouchPress(event.pointerId);
     const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    dragRef.current = null;
-    setScrubbing(false);
+    if (drag?.pointerId === event.pointerId) {
+      dragRef.current = null;
+      setScrubbing(false);
+    }
+    if (touchPress) setScrubReady(false);
   };
 
   return (
     <label className="number-field">
-      <span className="number-field-label"><span>{label}</span><small aria-hidden="true">drag ↔</small></span>
+      <span className="number-field-label"><span>{label}</span><small aria-hidden="true">hold ↔</small></span>
       <span className={`number-input-wrap ${scrubReady ? "scrub-ready" : ""} ${scrubbing ? "scrubbing" : ""}`}>
         <input
           type="number"
@@ -508,7 +570,7 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
           onPointerMove={moveScrub}
           onPointerUp={stopScrub}
           onPointerCancel={stopScrub}
-          title="Hover for half a second, then hold and drag horizontally for fine adjustment. Click normally to type."
+          title="Mouse: hover for half a second, then hold and drag horizontally. Touch: press and hold for half a second, then slide horizontally. Tap normally to type."
         />
         {unit && <em>{unit}</em>}
         <span className="scrub-hint" aria-hidden="true">{scrubbing ? "Fine adjusting…" : "Hold + drag ↔"}</span>
