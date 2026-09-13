@@ -40,7 +40,7 @@ const COMMON_DEFAULTS = {
   rotationOffset: 0,
 };
 
-const DEFAULT_PAGE = { paperId: "a4", orientation: "portrait", margin: 12, spaceVertical: true };
+const DEFAULT_PAGE = { paperId: "a4", orientation: "portrait", margin: 12, spaceVertical: true, rowGap: 0 };
 const PRESET_FORMAT = "stencil-studio-preset";
 const PRESET_VERSION = 1;
 const STORAGE_KEYS = {
@@ -135,6 +135,7 @@ function normalizePreset(input) {
     orientation: ["portrait", "landscape"].includes(sourcePage.orientation) ? sourcePage.orientation : DEFAULT_PAGE.orientation,
     margin: Number.isFinite(sourcePage.margin) ? clamp(sourcePage.margin, 5, 30) : DEFAULT_PAGE.margin,
     spaceVertical: sourcePage.spaceVertical !== false,
+    rowGap: Number.isFinite(sourcePage.rowGap) ? clamp(sourcePage.rowGap, 0, 50) : DEFAULT_PAGE.rowGap,
   };
 
   return {
@@ -370,6 +371,7 @@ function SheetPreview({ page, rows, svgRef }) {
   const { width, height, label } = paperDimensions(page);
   const innerWidth = width - page.margin * 2;
   const innerHeight = height - page.margin * 2;
+  const manualRowGap = Number.isFinite(page.rowGap) ? page.rowGap : DEFAULT_PAGE.rowGap;
   const layouts = rows.map((row) => {
     const count = repeatCount(row, innerWidth);
     return { row, count, height: verticalFootprint(row, count) };
@@ -377,8 +379,8 @@ function SheetPreview({ page, rows, svgRef }) {
   const occupiedHeight = layouts.reduce((total, layout) => total + layout.height, 0);
   const verticalGap = page.spaceVertical
     ? Math.max(0, (innerHeight - occupiedHeight) / (rows.length + 1))
-    : 0;
-  let verticalCursor = page.margin + verticalGap;
+    : manualRowGap;
+  let verticalCursor = page.margin + (page.spaceVertical ? verticalGap : 0);
   layouts.forEach((layout) => {
     layout.y = verticalCursor + layout.height / 2;
     verticalCursor += layout.height + verticalGap;
@@ -661,6 +663,7 @@ export default function App() {
 
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) ?? rows[0], [rows, selectedId]);
   const dimensions = paperDimensions(page);
+  const pageRowGap = Number.isFinite(page.rowGap) ? page.rowGap : DEFAULT_PAGE.rowGap;
   const printableWidth = dimensions.width - page.margin * 2;
   const pixelWidth = Math.round((dimensions.width / 25.4) * dpi);
   const pixelHeight = Math.round((dimensions.height / 25.4) * dpi);
@@ -876,7 +879,7 @@ export default function App() {
       context.registerTool({
         name: "configure_stencil_page",
         title: "Configure stencil page",
-        description: "Set the paper size, orientation, printable margin, or vertical row spacing in the visible stencil editor.",
+        description: "Set the paper size, orientation, printable margin, vertical spacing mode, or manual row gap in the visible stencil editor.",
         inputSchema: {
           type: "object",
           properties: {
@@ -884,6 +887,7 @@ export default function App() {
             orientation: { type: "string", enum: ["portrait", "landscape"] },
             margin: { type: "number", minimum: 5, maximum: 30 },
             spaceVertical: { type: "boolean" },
+            rowGap: { type: "number", minimum: 0, maximum: 50 },
           },
           additionalProperties: false,
         },
@@ -907,6 +911,10 @@ export default function App() {
           if (input.spaceVertical !== undefined) {
             if (typeof input.spaceVertical !== "boolean") throw new Error("spaceVertical must be a boolean.");
             next.spaceVertical = input.spaceVertical;
+          }
+          if (input.rowGap !== undefined) {
+            if (typeof input.rowGap !== "number" || input.rowGap < 0 || input.rowGap > 50) throw new Error("Row gap must be between 0 and 50 mm.");
+            next.rowGap = input.rowGap;
           }
           appStateRef.current = { ...appStateRef.current, page: next };
           setPage(next);
@@ -988,10 +996,21 @@ export default function App() {
           <RangeField label="Printable margin" value={page.margin} unit=" mm" min={5} max={30} onChange={(margin) => setPage({ ...page, margin })} />
           <SwitchField
             label="Space rows vertically"
-            description={page.spaceVertical ? "Evenly across the printable height" : "Stacked from the top with no extra gap"}
+            description={page.spaceVertical ? "Evenly across the printable height" : `Stacked with ${pageRowGap} mm between rows`}
             checked={page.spaceVertical}
-            onChange={(spaceVertical) => setPage({ ...page, spaceVertical })}
+            onChange={(spaceVertical) => setPage({ ...page, spaceVertical, rowGap: pageRowGap })}
           />
+          {!page.spaceVertical && (
+            <NumberField
+              label="Row gap"
+              value={pageRowGap}
+              unit="mm"
+              min={0}
+              max={50}
+              step={0.5}
+              onChange={(rowGap) => setPage({ ...page, rowGap })}
+            />
+          )}
         </section>
 
         <section className="panel-section rows-section">

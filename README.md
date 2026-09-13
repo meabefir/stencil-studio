@@ -5,7 +5,7 @@ Stencil Studio is a browser-based tattoo line-work sheet builder. It runs entire
 ## What it includes
 
 - A3, A4, A5, A6, US Letter, and US Legal paper sizes
-- Portrait and landscape orientation, printable margins in millimetres, and optional even vertical row spacing
+- Portrait and landscape orientation, printable margins in millimetres, optional even vertical row spacing, and a manual row gap for compact layouts
 - Editable rows for straight lines, circles, ovals, waves, squares, polygons, hearts, and stars
 - Shape-specific controls for size, thickness, arc angle, layered inner circles, oval ratio, wave amplitude and frequency, polygon sides, star points, and more
 - Solid, dashed, and dotted strokes
