@@ -249,9 +249,15 @@ function verticalFootprint(row, count) {
   return tallest + row.thickness;
 }
 
+function repeatStride(row) {
+  const offset = Number.isFinite(row.overlapOffset) ? row.overlapOffset : 0;
+  return Math.max(1, horizontalFootprint(row) + row.spacing + offset);
+}
+
 function repeatCount(row, availableWidth) {
   const shapeWidth = horizontalFootprint(row);
-  return clamp(Math.floor((availableWidth + row.spacing) / (shapeWidth + row.spacing)), 1, 48);
+  const stride = repeatStride(row);
+  return clamp(Math.floor((availableWidth - shapeWidth) / stride) + 1, 1, 48);
 }
 
 function typeMeta(type) {
@@ -410,14 +416,13 @@ function SheetPreview({ page, rows, svgRef }) {
       />
       {layouts.map(({ row, count, y }) => {
         const shapeWidth = Math.min(horizontalFootprint(row), innerWidth);
-        const firstX = count === 1 ? width / 2 : page.margin + shapeWidth / 2;
-        const lastX = count === 1 ? width / 2 : width - page.margin - shapeWidth / 2;
+        const firstX = page.margin + shapeWidth / 2;
+        const stride = repeatStride(row);
 
         return (
           <g key={row.id} data-row-type={row.type} data-row-y={y}>
             {Array.from({ length: count }, (_, index) => {
-              const baseX = count === 1 ? firstX : firstX + (lastX - firstX) * (index / (count - 1));
-              const x = baseX + row.overlapOffset * (index - (count - 1) / 2);
+              const x = firstX + index * stride;
               return <ElementShape key={index} row={row} index={index} x={x} y={y} />;
             })}
           </g>
@@ -1079,12 +1084,12 @@ export default function App() {
               </SelectField>
             </div>
             <RangeField label="Minimum spacing" value={selected.spacing} unit=" mm" min={1} max={30} onChange={(spacing) => updateSelected({ spacing })} />
-            <NumberField label="Overlap offset" value={selected.overlapOffset} unit="mm" min={-30} max={30} step={0.1} onChange={(overlapOffset) => updateSelected({ overlapOffset })} />
+            <NumberField label="Horizontal offset" value={selected.overlapOffset} unit="mm" min={-30} max={30} step={0.1} onChange={(overlapOffset) => updateSelected({ overlapOffset })} />
             <div className="two-column compact-fields">
               <NumberField label="Rotation" value={selected.rotation} unit="°" min={-180} max={180} onChange={(rotation) => updateSelected({ rotation })} />
               <NumberField label="Step offset" value={selected.rotationOffset} unit="°" min={-90} max={90} onChange={(rotationOffset) => updateSelected({ rotationOffset })} />
             </div>
-            <p className="field-help">Negative overlap packs elements together; positive overlap spreads them apart. Step offset progressively rotates each repeat.</p>
+            <p className="field-help">Offset is applied from the left. Negative values pack repeats together and use the freed space for more shapes; positive values spread them apart. Step offset progressively rotates each repeat.</p>
           </section>
         )}
       </aside>
