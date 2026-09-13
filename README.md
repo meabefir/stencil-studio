@@ -5,13 +5,15 @@ Stencil Studio is a browser-based tattoo line-work sheet builder. It runs entire
 ## What it includes
 
 - A3, A4, A5, A6, US Letter, and US Legal paper sizes
-- Portrait and landscape orientation, with printable margins in millimetres
+- Portrait and landscape orientation, printable margins in millimetres, and optional even vertical row spacing
 - Editable rows for straight lines, circles, ovals, waves, squares, polygons, hearts, and stars
 - Shape-specific controls for size, thickness, arc angle, layered inner circles, oval ratio, wave amplitude and frequency, polygon sides, star points, and more
 - Solid, dashed, and dotted strokes
-- Per-element rotation and progressive rotation offset
-- Automatic, even repeat spacing inside the printable width
+- Per-element rotation, progressive rotation offset, and a per-row overlap offset for tighter or wider packing
+- Automatic, even repeat spacing inside the printable width, with compact row stacking when vertical spacing is disabled
 - Drag, arrow-button, duplicate, and delete row actions
+- Fine adjustment for numeric controls: hover a number for half a second, then hold and drag horizontally
+- Automatic browser-local saving, named local presets, and compatible JSON preset download/import
 - PNG and JPEG export at 150, 300, or 600 DPI
 - Responsive layout for desktop and mobile browsers
 
@@ -31,6 +33,16 @@ npm run build
 ```
 
 The finished static site will be in `dist/`.
+
+## Saving presets
+
+The current sheet is saved automatically in the browser and restored the next time Stencil Studio is opened on the same site and device. Use **Presets** in the header to save named browser-local versions, load them later, or download a portable JSON file. **Import JSON** accepts that same preset format.
+
+Browser-local saves do not leave the device and are specific to the site's address. Download a JSON preset when you want a backup or need to move a design to another browser or device.
+
+## Fine-adjusting values
+
+Numeric fields can still be clicked and typed normally. For precise mouse adjustment, hover over a numeric input for half a second, then hold and drag horizontally. The deliberately low sensitivity makes small thickness, overlap, and rotation changes easier to control.
 
 ## Publish with GitHub Pages
 

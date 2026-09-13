@@ -35,8 +35,17 @@ const COMMON_DEFAULTS = {
   thickness: 0.65,
   strokeStyle: "solid",
   spacing: 7,
+  overlapOffset: 0,
   rotation: 0,
   rotationOffset: 0,
+};
+
+const DEFAULT_PAGE = { paperId: "a4", orientation: "portrait", margin: 12, spaceVertical: true };
+const PRESET_FORMAT = "stencil-studio-preset";
+const PRESET_VERSION = 1;
+const STORAGE_KEYS = {
+  workspace: "stencil-studio.workspace.v1",
+  presets: "stencil-studio.presets.v1",
 };
 
 const initialRows = [
@@ -61,6 +70,106 @@ function createRow(type = "line", overrides = {}) {
     ...TYPE_DEFAULTS[safeType],
     ...overrides,
   };
+}
+
+function normalizeRow(input) {
+  const safeInput = input && typeof input === "object" ? input : {};
+  const type = TYPE_DEFAULTS[safeInput.type] ? safeInput.type : "line";
+  const row = createRow(type);
+  const limits = {
+    thickness: [0.2, 3],
+    spacing: [1, 30],
+    overlapOffset: [-30, 30],
+    rotation: [-180, 180],
+    rotationOffset: [-90, 90],
+    length: [1, 200],
+    radius: [1, 100],
+    arcAngle: [1, 360],
+    layers: [1, 12],
+    innerThickness: [0.1, 5],
+    layerGap: [0.1, 50],
+    stretch: [0.1, 10],
+    amplitude: [0.1, 100],
+    frequency: [0.1, 20],
+    side: [1, 200],
+    sides: [3, 24],
+    size: [1, 200],
+    points: [3, 24],
+    innerRatio: [0.05, 0.95],
+  };
+
+  Object.entries(limits).forEach(([key, [min, max]]) => {
+    if (Number.isFinite(safeInput[key])) row[key] = clamp(safeInput[key], min, max);
+  });
+  ["layers", "sides", "points"].forEach((key) => {
+    if (Number.isFinite(row[key])) row[key] = Math.round(row[key]);
+  });
+  if (["solid", "dashed", "dotted"].includes(safeInput.strokeStyle)) row.strokeStyle = safeInput.strokeStyle;
+  if (typeof safeInput.id === "string" && safeInput.id.length > 0) row.id = safeInput.id;
+  return row;
+}
+
+function makePreset(name, page, rows, dpi) {
+  return {
+    format: PRESET_FORMAT,
+    version: PRESET_VERSION,
+    name: String(name || "Untitled preset").trim().slice(0, 60) || "Untitled preset",
+    savedAt: new Date().toISOString(),
+    page: { ...page },
+    rows: rows.map((row) => ({ ...row })),
+    dpi,
+  };
+}
+
+function normalizePreset(input) {
+  if (!input || typeof input !== "object" || input.format !== PRESET_FORMAT || input.version !== PRESET_VERSION) {
+    throw new Error("This is not a Stencil Studio preset.");
+  }
+  if (!Array.isArray(input.rows) || input.rows.length < 1 || input.rows.length > 100) {
+    throw new Error("The preset must contain between 1 and 100 rows.");
+  }
+
+  const sourcePage = input.page && typeof input.page === "object" ? input.page : {};
+  const page = {
+    paperId: PAPER_SIZES.some((paper) => paper.id === sourcePage.paperId) ? sourcePage.paperId : DEFAULT_PAGE.paperId,
+    orientation: ["portrait", "landscape"].includes(sourcePage.orientation) ? sourcePage.orientation : DEFAULT_PAGE.orientation,
+    margin: Number.isFinite(sourcePage.margin) ? clamp(sourcePage.margin, 5, 30) : DEFAULT_PAGE.margin,
+    spaceVertical: sourcePage.spaceVertical !== false,
+  };
+
+  return {
+    format: PRESET_FORMAT,
+    version: PRESET_VERSION,
+    name: typeof input.name === "string" && input.name.trim() ? input.name.trim().slice(0, 60) : "Imported preset",
+    savedAt: typeof input.savedAt === "string" ? input.savedAt : new Date().toISOString(),
+    page,
+    rows: input.rows.map(normalizeRow),
+    dpi: [150, 300, 600].includes(Number(input.dpi)) ? Number(input.dpi) : 300,
+  };
+}
+
+function readStoredWorkspace() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEYS.workspace);
+    return raw ? normalizePreset(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredPresets() {
+  try {
+    const raw = JSON.parse(window.localStorage.getItem(STORAGE_KEYS.presets) || "[]");
+    return Array.isArray(raw) ? raw.flatMap((item) => {
+      try {
+        return [normalizePreset(item)];
+      } catch {
+        return [];
+      }
+    }) : [];
+  } catch {
+    return [];
+  }
 }
 
 function paperDimensions(page) {
@@ -124,6 +233,19 @@ function horizontalFootprint(row) {
     widest = Math.max(widest, projectedWidth);
   }
   return widest + row.thickness;
+}
+
+function verticalFootprint(row, count) {
+  const width = elementWidth(row);
+  const height = elementHeight(row);
+  if (["circle", "polygon", "star"].includes(row.type)) return Math.max(width, height) + row.thickness;
+  let tallest = 0;
+  for (let index = 0; index < Math.max(1, count); index += 1) {
+    const angle = ((row.rotation + row.rotationOffset * index) * Math.PI) / 180;
+    const projectedHeight = Math.abs(width * Math.sin(angle)) + Math.abs(height * Math.cos(angle));
+    tallest = Math.max(tallest, projectedHeight);
+  }
+  return tallest + row.thickness;
 }
 
 function repeatCount(row, availableWidth) {
@@ -248,7 +370,19 @@ function SheetPreview({ page, rows, svgRef }) {
   const { width, height, label } = paperDimensions(page);
   const innerWidth = width - page.margin * 2;
   const innerHeight = height - page.margin * 2;
-  const rowHeight = innerHeight / Math.max(rows.length, 1);
+  const layouts = rows.map((row) => {
+    const count = repeatCount(row, innerWidth);
+    return { row, count, height: verticalFootprint(row, count) };
+  });
+  const occupiedHeight = layouts.reduce((total, layout) => total + layout.height, 0);
+  const verticalGap = page.spaceVertical
+    ? Math.max(0, (innerHeight - occupiedHeight) / (rows.length + 1))
+    : 0;
+  let verticalCursor = page.margin + verticalGap;
+  layouts.forEach((layout) => {
+    layout.y = verticalCursor + layout.height / 2;
+    verticalCursor += layout.height + verticalGap;
+  });
 
   return (
     <svg
@@ -272,17 +406,16 @@ function SheetPreview({ page, rows, svgRef }) {
         height={innerHeight}
         fill="none"
       />
-      {rows.map((row, rowIndex) => {
-        const count = repeatCount(row, innerWidth);
+      {layouts.map(({ row, count, y }) => {
         const shapeWidth = Math.min(horizontalFootprint(row), innerWidth);
         const firstX = count === 1 ? width / 2 : page.margin + shapeWidth / 2;
         const lastX = count === 1 ? width / 2 : width - page.margin - shapeWidth / 2;
-        const y = page.margin + rowHeight * (rowIndex + 0.5);
 
         return (
-          <g key={row.id} data-row-type={row.type}>
+          <g key={row.id} data-row-type={row.type} data-row-y={y}>
             {Array.from({ length: count }, (_, index) => {
-              const x = count === 1 ? firstX : firstX + (lastX - firstX) * (index / (count - 1));
+              const baseX = count === 1 ? firstX : firstX + (lastX - firstX) * (index / (count - 1));
+              const x = baseX + row.overlapOffset * (index - (count - 1) / 2);
               return <ElementShape key={index} row={row} index={index} x={x} y={y} />;
             })}
           </g>
@@ -309,10 +442,54 @@ function RangeField({ label, value, unit = "", min, max, step = 1, onChange }) {
 }
 
 function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) {
+  const [scrubReady, setScrubReady] = useState(false);
+  const [scrubbing, setScrubbing] = useState(false);
+  const hoverTimerRef = useRef(null);
+  const dragRef = useRef(null);
+
+  useEffect(() => () => window.clearTimeout(hoverTimerRef.current), []);
+
+  const startHover = (event) => {
+    if (event.pointerType !== "mouse") return;
+    window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = window.setTimeout(() => setScrubReady(true), 500);
+  };
+
+  const stopHover = () => {
+    window.clearTimeout(hoverTimerRef.current);
+    if (!dragRef.current) setScrubReady(false);
+  };
+
+  const startScrub = (event) => {
+    if (!scrubReady || event.pointerType === "touch") return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startValue: value };
+    setScrubbing(true);
+  };
+
+  const moveScrub = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const raw = drag.startValue + ((event.clientX - drag.startX) / 18) * step;
+    const decimals = Math.max(0, (String(step).split(".")[1] || "").length);
+    const stepped = Math.round(raw / step) * step;
+    onChange(clamp(Number(stepped.toFixed(decimals)), min, max));
+  };
+
+  const stopScrub = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    dragRef.current = null;
+    setScrubbing(false);
+  };
+
   return (
     <label className="number-field">
-      <span>{label}</span>
-      <span className="number-input-wrap">
+      <span className="number-field-label"><span>{label}</span><small aria-hidden="true">drag ↔</small></span>
+      <span className={`number-input-wrap ${scrubReady ? "scrub-ready" : ""} ${scrubbing ? "scrubbing" : ""}`}>
         <input
           type="number"
           value={value}
@@ -323,8 +500,16 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
             const next = Number(event.target.value);
             if (Number.isFinite(next)) onChange(clamp(next, min, max));
           }}
+          onPointerEnter={startHover}
+          onPointerLeave={stopHover}
+          onPointerDown={startScrub}
+          onPointerMove={moveScrub}
+          onPointerUp={stopScrub}
+          onPointerCancel={stopScrub}
+          title="Hover for half a second, then hold and drag horizontally for fine adjustment. Click normally to type."
         />
         {unit && <em>{unit}</em>}
+        <span className="scrub-hint" aria-hidden="true">{scrubbing ? "Fine adjusting…" : "Hold + drag ↔"}</span>
       </span>
     </label>
   );
@@ -391,18 +576,88 @@ function ShapeControls({ row, update }) {
   }
 }
 
+function SwitchField({ label, description, checked, onChange }) {
+  return (
+    <label className="switch-field">
+      <span><strong>{label}</strong><small>{description}</small></span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+      <span className="switch-track" aria-hidden="true"><span /></span>
+    </label>
+  );
+}
+
+function PresetDialog({ open, name, setName, presets, onClose, onSave, onDownload, onLoad, onImport }) {
+  const fileInputRef = useRef(null);
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="preset-dialog" role="dialog" aria-modal="true" aria-labelledby="preset-title">
+        <header className="dialog-header">
+          <div><span className="dialog-kicker">Local workspace</span><h2 id="preset-title">Save or load a preset</h2></div>
+          <button type="button" className="dialog-close" aria-label="Close presets" onClick={onClose}>×</button>
+        </header>
+        <p className="dialog-copy">Your current sheet is auto-saved in this browser. Named presets and downloaded JSON files use the same format.</p>
+
+        <div className="preset-save-panel">
+          <label className="preset-name-field">
+            <span>Preset name</span>
+            <input autoFocus type="text" maxLength="60" value={name} onChange={(event) => setName(event.target.value)} />
+          </label>
+          <div className="dialog-actions">
+            <button type="button" className="dialog-button primary" disabled={!name.trim()} onClick={onSave}>Save in browser</button>
+            <button type="button" className="dialog-button" disabled={!name.trim()} onClick={onDownload}>Download JSON</button>
+          </div>
+        </div>
+
+        <div className="preset-library-heading">
+          <div><h3>Saved in this browser</h3><small>{presets.length} preset{presets.length === 1 ? "" : "s"}</small></div>
+          <button type="button" className="dialog-button compact" onClick={() => fileInputRef.current?.click()}>Import JSON</button>
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            accept="application/json,.json"
+            onChange={async (event) => {
+              const file = event.target.files?.[0];
+              if (file) await onImport(file);
+              event.target.value = "";
+            }}
+          />
+        </div>
+
+        <div className="preset-list">
+          {presets.length === 0 ? (
+            <div className="preset-empty"><strong>No named presets yet</strong><span>Save the current sheet above, or import a JSON preset.</span></div>
+          ) : presets.map((preset) => (
+            <button key={`${preset.name}-${preset.savedAt}`} type="button" className="preset-item" onClick={() => onLoad(preset)}>
+              <span><strong>{preset.name}</strong><small>{preset.rows.length} rows · {paperDimensions(preset.page).label} · {preset.page.orientation}</small></span>
+              <span className="preset-date">{new Date(preset.savedAt).toLocaleDateString()}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export default function App() {
-  const [page, setPage] = useState({ paperId: "a4", orientation: "portrait", margin: 12 });
-  const [rows, setRows] = useState(initialRows);
-  const [selectedId, setSelectedId] = useState(initialRows[0].id);
+  const [restoredWorkspace] = useState(() => readStoredWorkspace());
+  const startingRows = restoredWorkspace?.rows ?? initialRows;
+  const [page, setPage] = useState(restoredWorkspace?.page ?? DEFAULT_PAGE);
+  const [rows, setRows] = useState(startingRows);
+  const [selectedId, setSelectedId] = useState(startingRows[0].id);
   const [draggedId, setDraggedId] = useState(null);
-  const [dpi, setDpi] = useState(300);
+  const [dpi, setDpi] = useState(restoredWorkspace?.dpi ?? 300);
   const [exporting, setExporting] = useState(false);
   const [notice, setNotice] = useState("");
+  const [presetOpen, setPresetOpen] = useState(false);
+  const [presetName, setPresetName] = useState("My stencil");
+  const [presets, setPresets] = useState(() => readStoredPresets());
   const svgRef = useRef(null);
-  const appStateRef = useRef({ page, rows });
+  const appStateRef = useRef({ page, rows, dpi });
   const noticeTimeoutRef = useRef(null);
-  appStateRef.current = { page, rows };
+  appStateRef.current = { page, rows, dpi };
 
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) ?? rows[0], [rows, selectedId]);
   const dimensions = paperDimensions(page);
@@ -414,6 +669,73 @@ export default function App() {
     setNotice(message);
     window.clearTimeout(noticeTimeoutRef.current);
     noticeTimeoutRef.current = window.setTimeout(() => setNotice(""), 2800);
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(STORAGE_KEYS.workspace, JSON.stringify(makePreset("Autosave", page, rows, dpi)));
+      } catch {
+        // The editor remains usable when browser storage is unavailable.
+      }
+    }, 180);
+    return () => window.clearTimeout(timer);
+  }, [page, rows, dpi]);
+
+  useEffect(() => {
+    if (!presetOpen) return undefined;
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setPresetOpen(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [presetOpen]);
+
+  const savePresetInBrowser = () => {
+    const preset = makePreset(presetName, page, rows, dpi);
+    const next = [preset, ...presets.filter((item) => item.name.toLowerCase() !== preset.name.toLowerCase())].slice(0, 30);
+    try {
+      window.localStorage.setItem(STORAGE_KEYS.presets, JSON.stringify(next));
+      setPresets(next);
+      showNotice(`“${preset.name}” saved in this browser`);
+    } catch {
+      showNotice("Browser storage is unavailable");
+    }
+  };
+
+  const downloadPreset = () => {
+    const preset = makePreset(presetName, page, rows, dpi);
+    const blob = new Blob([`${JSON.stringify(preset, null, 2)}\n`], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${preset.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "stencil-preset"}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showNotice("Preset JSON downloaded");
+  };
+
+  const loadPreset = (input) => {
+    try {
+      const preset = normalizePreset(input);
+      setPage(preset.page);
+      setRows(preset.rows);
+      setSelectedId(preset.rows[0].id);
+      setDpi(preset.dpi);
+      setPresetName(preset.name);
+      setPresetOpen(false);
+      showNotice(`“${preset.name}” loaded`);
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Preset could not be loaded");
+    }
+  };
+
+  const importPreset = async (file) => {
+    try {
+      loadPreset(JSON.parse(await file.text()));
+    } catch (error) {
+      showNotice(error instanceof Error ? error.message : "Preset JSON could not be read");
+    }
   };
 
   const updateSelected = (patch) => {
@@ -433,6 +755,7 @@ export default function App() {
         thickness: row.thickness,
         strokeStyle: row.strokeStyle,
         spacing: row.spacing,
+        overlapOffset: row.overlapOffset,
         rotation: row.rotation,
         rotationOffset: row.rotationOffset,
       };
@@ -553,13 +876,14 @@ export default function App() {
       context.registerTool({
         name: "configure_stencil_page",
         title: "Configure stencil page",
-        description: "Set the paper size, orientation, or printable margin in the visible stencil editor.",
+        description: "Set the paper size, orientation, printable margin, or vertical row spacing in the visible stencil editor.",
         inputSchema: {
           type: "object",
           properties: {
             paperId: { type: "string", enum: PAPER_SIZES.map((item) => item.id) },
             orientation: { type: "string", enum: ["portrait", "landscape"] },
             margin: { type: "number", minimum: 5, maximum: 30 },
+            spaceVertical: { type: "boolean" },
           },
           additionalProperties: false,
         },
@@ -579,6 +903,10 @@ export default function App() {
           if (input.margin !== undefined) {
             if (typeof input.margin !== "number" || input.margin < 5 || input.margin > 30) throw new Error("Margin must be between 5 and 30 mm.");
             next.margin = input.margin;
+          }
+          if (input.spaceVertical !== undefined) {
+            if (typeof input.spaceVertical !== "boolean") throw new Error("spaceVertical must be a boolean.");
+            next.spaceVertical = input.spaceVertical;
           }
           appStateRef.current = { ...appStateRef.current, page: next };
           setPage(next);
@@ -630,6 +958,7 @@ export default function App() {
       <header className="topbar">
         <div className="brand-mark" aria-hidden="true"><span>S</span></div>
         <div className="brand-copy"><h1>Stencil Studio</h1><p>Line-work sheet builder</p></div>
+        <button className="preset-button" type="button" onClick={() => setPresetOpen(true)}><span>Presets</span><small>Auto-saved</small></button>
         <div className="export-tools" aria-label="Export settings">
           <label className="dpi-select">
             <span>Resolution</span>
@@ -657,6 +986,12 @@ export default function App() {
             </SelectField>
           </div>
           <RangeField label="Printable margin" value={page.margin} unit=" mm" min={5} max={30} onChange={(margin) => setPage({ ...page, margin })} />
+          <SwitchField
+            label="Space rows vertically"
+            description={page.spaceVertical ? "Evenly across the printable height" : "Stacked from the top with no extra gap"}
+            checked={page.spaceVertical}
+            onChange={(spaceVertical) => setPage({ ...page, spaceVertical })}
+          />
         </section>
 
         <section className="panel-section rows-section">
@@ -718,11 +1053,12 @@ export default function App() {
               </SelectField>
             </div>
             <RangeField label="Minimum spacing" value={selected.spacing} unit=" mm" min={1} max={30} onChange={(spacing) => updateSelected({ spacing })} />
+            <NumberField label="Overlap offset" value={selected.overlapOffset} unit="mm" min={-30} max={30} step={0.1} onChange={(overlapOffset) => updateSelected({ overlapOffset })} />
             <div className="two-column compact-fields">
               <NumberField label="Rotation" value={selected.rotation} unit="°" min={-180} max={180} onChange={(rotation) => updateSelected({ rotation })} />
               <NumberField label="Step offset" value={selected.rotationOffset} unit="°" min={-90} max={90} onChange={(rotationOffset) => updateSelected({ rotationOffset })} />
             </div>
-            <p className="field-help">Step offset rotates each repeat a little more than the previous one.</p>
+            <p className="field-help">Negative overlap packs elements together; positive overlap spreads them apart. Step offset progressively rotates each repeat.</p>
           </section>
         )}
       </aside>
@@ -740,6 +1076,17 @@ export default function App() {
         <p className="canvas-caption">The dashed margin guide is preview-only and will not appear in exports.</p>
       </section>
 
+      <PresetDialog
+        open={presetOpen}
+        name={presetName}
+        setName={setPresetName}
+        presets={presets}
+        onClose={() => setPresetOpen(false)}
+        onSave={savePresetInBrowser}
+        onDownload={downloadPreset}
+        onLoad={loadPreset}
+        onImport={importPreset}
+      />
       {notice && <div className="toast" role="status">{notice}</div>}
     </main>
   );
