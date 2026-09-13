@@ -265,11 +265,18 @@ function typeMeta(type) {
   return ELEMENT_TYPES.find((item) => item.id === type) ?? ELEMENT_TYPES[0];
 }
 
-function strokeProps(row, width = row.thickness) {
+function dotSpacing(pathLength, width) {
+  if (!Number.isFinite(pathLength) || pathLength <= 0) return width * 3.3;
+  const preferredSpacing = Math.max(width * 3.3, width + 0.8);
+  const dotCount = Math.max(1, Math.round(pathLength / preferredSpacing));
+  return pathLength / dotCount;
+}
+
+function strokeProps(row, width = row.thickness, pathLength) {
   const dash = row.strokeStyle === "dashed"
     ? `${width * 5} ${width * 3}`
     : row.strokeStyle === "dotted"
-      ? `0 ${width * 3.3}`
+      ? `0 ${dotSpacing(pathLength, width)}`
       : undefined;
 
   return {
@@ -278,7 +285,8 @@ function strokeProps(row, width = row.thickness) {
     strokeWidth: width,
     strokeDasharray: dash,
     strokeLinecap: row.strokeStyle === "dotted" ? "round" : "butt",
-    strokeLinejoin: "round",
+    strokeLinejoin: row.type === "square" ? "miter" : "round",
+    strokeMiterlimit: 10,
   };
 }
 
@@ -293,23 +301,63 @@ function arcPath(rx, ry, angle) {
   return `M ${startPoint[0]} ${startPoint[1]} A ${rx} ${ry} 0 ${largeArc} 1 ${endPoint[0]} ${endPoint[1]}`;
 }
 
-function regularPolygonPoints(sides, outerRadius, innerRadius = null) {
+function regularPolygonVertices(sides, outerRadius, innerRadius = null) {
   const total = innerRadius === null ? sides : sides * 2;
   return Array.from({ length: total }, (_, index) => {
     const angle = -Math.PI / 2 + (Math.PI * 2 * index) / total;
     const radius = innerRadius === null || index % 2 === 0 ? outerRadius : innerRadius;
-    return `${Math.cos(angle) * radius},${Math.sin(angle) * radius}`;
-  }).join(" ");
+    return [Math.cos(angle) * radius, Math.sin(angle) * radius];
+  });
 }
 
-function wavePath(length, amplitude, frequency) {
-  const samples = 80;
-  return Array.from({ length: samples + 1 }, (_, index) => {
+function regularPolygonPoints(sides, outerRadius, innerRadius = null) {
+  return regularPolygonVertices(sides, outerRadius, innerRadius)
+    .map(([x, y]) => `${x},${y}`)
+    .join(" ");
+}
+
+function closedPathLength(points) {
+  return points.reduce((length, point, index) => {
+    const previous = points[(index - 1 + points.length) % points.length];
+    return length + Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+  }, 0);
+}
+
+function ellipseCircumference(rx, ry) {
+  const sum = rx + ry;
+  return Math.PI * (3 * sum - Math.sqrt((3 * rx + ry) * (rx + 3 * ry)));
+}
+
+function ellipseArcLength(rx, ry, angle) {
+  if (angle >= 359.8) return ellipseCircumference(rx, ry);
+  const safeAngle = clamp(angle, 1, 359.8);
+  const samples = Math.max(36, Math.ceil(safeAngle / 2));
+  const start = (-90 - safeAngle / 2) * (Math.PI / 180);
+  const span = safeAngle * (Math.PI / 180);
+  let length = 0;
+  let previous = [Math.cos(start) * rx, Math.sin(start) * ry];
+  for (let index = 1; index <= samples; index += 1) {
+    const radians = start + (span * index) / samples;
+    const point = [Math.cos(radians) * rx, Math.sin(radians) * ry];
+    length += Math.hypot(point[0] - previous[0], point[1] - previous[1]);
+    previous = point;
+  }
+  return length;
+}
+
+function waveData(length, amplitude, frequency) {
+  const samples = Math.max(240, Math.ceil(Math.abs(frequency) * 96));
+  let pathLength = 0;
+  let previous = null;
+  const d = Array.from({ length: samples + 1 }, (_, index) => {
     const progress = index / samples;
     const x = -length / 2 + progress * length;
     const y = -Math.sin(progress * Math.PI * 2 * frequency) * amplitude;
+    if (previous) pathLength += Math.hypot(x - previous[0], y - previous[1]);
+    previous = [x, y];
     return `${index === 0 ? "M" : "L"} ${x.toFixed(3)} ${y.toFixed(3)}`;
   }).join(" ");
+  return { d, pathLength };
 }
 
 function LayeredArc({ row, oval = false }) {
@@ -318,7 +366,11 @@ function LayeredArc({ row, oval = false }) {
     if (layerRadius <= 0.7) return null;
     const rx = oval ? layerRadius * row.stretch : layerRadius;
     const ry = layerRadius;
-    const props = strokeProps(row, index === 0 ? row.thickness : row.innerThickness);
+    const props = strokeProps(
+      row,
+      index === 0 ? row.thickness : row.innerThickness,
+      ellipseArcLength(rx, ry, row.arcAngle),
+    );
     if (row.arcAngle >= 359.8) {
       return oval
         ? <ellipse key={index} cx="0" cy="0" rx={rx} ry={ry} {...props} />
@@ -330,12 +382,11 @@ function LayeredArc({ row, oval = false }) {
 
 function ElementShape({ row, index, x, y }) {
   const rotation = row.rotation + row.rotationOffset * index;
-  const props = strokeProps(row);
   let shape = null;
 
   switch (row.type) {
     case "line":
-      shape = <line x1={-row.length / 2} y1="0" x2={row.length / 2} y2="0" {...props} />;
+      shape = <line x1={-row.length / 2} y1="0" x2={row.length / 2} y2="0" {...strokeProps(row, row.thickness, row.length)} />;
       break;
     case "circle":
       shape = <LayeredArc row={row} />;
@@ -343,14 +394,16 @@ function ElementShape({ row, index, x, y }) {
     case "oval":
       shape = <LayeredArc row={row} oval />;
       break;
-    case "wave":
-      shape = <path d={wavePath(row.length, row.amplitude, row.frequency)} {...props} />;
+    case "wave": {
+      const wave = waveData(row.length, row.amplitude, row.frequency);
+      shape = <path d={wave.d} {...strokeProps(row, row.thickness, wave.pathLength)} />;
       break;
+    }
     case "square":
-      shape = <rect x={-row.side / 2} y={-row.side / 2} width={row.side} height={row.side} {...props} />;
+      shape = <rect x={-row.side / 2} y={-row.side / 2} width={row.side} height={row.side} {...strokeProps(row, row.thickness, row.side * 4)} />;
       break;
     case "polygon":
-      shape = <polygon points={regularPolygonPoints(row.sides, row.radius)} {...props} />;
+      shape = <polygon points={regularPolygonPoints(row.sides, row.radius)} {...strokeProps(row, row.thickness, closedPathLength(regularPolygonVertices(row.sides, row.radius)))} />;
       break;
     case "heart": {
       const scale = row.size / 24;
@@ -359,13 +412,13 @@ function ElementShape({ row, index, x, y }) {
           d="M 0 10 C -3 6 -12 1 -12 -5 C -12 -11 -4 -14 0 -8 C 4 -14 12 -11 12 -5 C 12 1 3 6 0 10 Z"
           transform={`scale(${scale})`}
           vectorEffect="non-scaling-stroke"
-          {...props}
+          {...strokeProps(row)}
         />
       );
       break;
     }
     case "star":
-      shape = <polygon points={regularPolygonPoints(row.points, row.radius, row.radius * row.innerRatio)} {...props} />;
+      shape = <polygon points={regularPolygonPoints(row.points, row.radius, row.radius * row.innerRatio)} {...strokeProps(row, row.thickness, closedPathLength(regularPolygonVertices(row.points, row.radius, row.radius * row.innerRatio)))} />;
       break;
     default:
       shape = null;
