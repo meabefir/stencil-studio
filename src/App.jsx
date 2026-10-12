@@ -36,6 +36,7 @@ const COMMON_DEFAULTS = {
   strokeStyle: "solid",
   spacing: 7,
   overlapOffset: 0,
+  extraGap: 0,
   rotation: 0,
   rotationOffset: 0,
 };
@@ -420,18 +421,20 @@ function SheetPreview({ page, rows, svgRef }) {
   const innerWidth = Math.max(0, width - page.margin * 2);
   const innerHeight = Math.max(0, height - page.margin * 2);
   const manualRowGap = Number.isFinite(page.rowGap) ? page.rowGap : DEFAULT_PAGE.rowGap;
-  const layouts = rows.map((row) => {
+  const layouts = rows.map((row, index) => {
     const count = repeatCount(row, innerWidth);
-    return { row, count, height: verticalFootprint(row, count) };
+    const extraGap = index < rows.length - 1 && Number.isFinite(row.extraGap) ? row.extraGap : 0;
+    return { row, count, height: verticalFootprint(row, count), extraGap };
   });
   const occupiedHeight = layouts.reduce((total, layout) => total + layout.height, 0);
+  const extraGapHeight = layouts.reduce((total, layout) => total + layout.extraGap, 0);
   const verticalGap = page.spaceVertical
-    ? Math.max(0, (innerHeight - occupiedHeight) / (rows.length + 1))
+    ? Math.max(0, (innerHeight - occupiedHeight - extraGapHeight) / (rows.length + 1))
     : manualRowGap;
   let verticalCursor = page.margin + (page.spaceVertical ? verticalGap : 0);
   layouts.forEach((layout) => {
     layout.y = verticalCursor + layout.height / 2;
-    verticalCursor += layout.height + verticalGap;
+    verticalCursor += layout.height + verticalGap + layout.extraGap;
   });
 
   return (
@@ -839,6 +842,7 @@ export default function App() {
         strokeStyle: row.strokeStyle,
         spacing: row.spacing,
         overlapOffset: row.overlapOffset,
+        extraGap: row.extraGap ?? COMMON_DEFAULTS.extraGap,
         rotation: row.rotation,
         rotationOffset: row.rotationOffset,
       };
@@ -1158,6 +1162,10 @@ export default function App() {
               <NumberField label="Step offset" value={selected.rotationOffset} unit="°" min={-90} max={90} onChange={(rotationOffset) => updateSelected({ rotationOffset })} />
             </div>
             <p className="field-help">Offset is applied from the left. Negative values pack repeats together and use the freed space for more shapes; positive values spread them apart. Step offset progressively rotates each repeat.</p>
+            <div className="row-gap-control">
+              <NumberField label="Extra gap after row" value={selected.extraGap ?? 0} unit="mm" min={-50} max={50} step={0.5} onChange={(extraGap) => updateSelected({ extraGap })} />
+              <p className="field-help">Added to the global row gap or automatic spacing before the next row. Positive values add space; negative values bring the next row closer.</p>
+            </div>
           </section>
         )}
       </aside>

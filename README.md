@@ -5,7 +5,7 @@ Stencil Studio is a browser-based tattoo line-work sheet builder. It runs entire
 ## What it includes
 
 - A3, A4, A5, A6, US Letter, and US Legal paper sizes
-- Portrait and landscape orientation, printable margins in millimetres, optional even vertical row spacing, and a manual row gap for compact layouts
+- Portrait and landscape orientation, printable margins in millimetres, optional even vertical row spacing, a global row gap for compact layouts, and an extra gap after each individual row
 - Editable rows for straight lines, circles, ovals, waves, squares, polygons, hearts, and stars
 - Shape-specific controls for size, thickness, arc angle, layered inner circles, oval ratio, wave amplitude and frequency, polygon sides, star points, and more
 - Solid, dashed, and dotted strokes
@@ -39,6 +39,12 @@ The finished static site will be in `dist/`.
 The current sheet is saved automatically in the browser and restored the next time Stencil Studio is opened on the same site and device. Use **Presets** in the header to save named browser-local versions, load them later, or download a portable JSON file. **Import JSON** accepts that same preset format.
 
 Browser-local saves do not leave the device and are specific to the site's address. Download a JSON preset when you want a backup or need to move a design to another browser or device.
+
+## Individual row gaps
+
+Select a row and adjust **Extra gap after row** in millimetres. With vertical spacing disabled, the space before the next row is the global **Row gap** plus this extra value. With automatic vertical spacing enabled, the extra gaps are reserved first and the remaining space is distributed evenly. Positive values increase the gap; negative values reduce it and can overlap adjacent rows.
+
+The setting belongs to the selected row, follows it when reordered, and is copied when duplicated. It is saved in autosave and presets. The last row has no following gap, but its value is kept for when another row follows it. Older presets default to zero extra gap.
 
 ## Fine-adjusting values
 
