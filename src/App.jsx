@@ -77,33 +77,11 @@ function normalizeRow(input) {
   const safeInput = input && typeof input === "object" ? input : {};
   const type = TYPE_DEFAULTS[safeInput.type] ? safeInput.type : "line";
   const row = createRow(type);
-  const limits = {
-    thickness: [0.2, 3],
-    spacing: [1, 30],
-    overlapOffset: [-30, 30],
-    rotation: [-180, 180],
-    rotationOffset: [-90, 90],
-    length: [1, 200],
-    radius: [1, 100],
-    arcAngle: [1, 360],
-    layers: [1, 12],
-    innerThickness: [0.1, 5],
-    layerGap: [0.1, 50],
-    stretch: [0.1, 10],
-    amplitude: [0.1, 100],
-    frequency: [0.1, 20],
-    side: [1, 200],
-    sides: [3, 24],
-    size: [1, 200],
-    points: [3, 24],
-    innerRatio: [0.05, 0.95],
-  };
-
-  Object.entries(limits).forEach(([key, [min, max]]) => {
-    if (Number.isFinite(safeInput[key])) row[key] = clamp(safeInput[key], min, max);
+  Object.keys({ ...COMMON_DEFAULTS, ...TYPE_DEFAULTS[type] }).forEach((key) => {
+    if (Number.isFinite(safeInput[key])) row[key] = safeInput[key];
   });
-  ["layers", "sides", "points"].forEach((key) => {
-    if (Number.isFinite(row[key])) row[key] = Math.round(row[key]);
+  Object.entries({ layers: [1, 12], sides: [3, 24], points: [3, 24] }).forEach(([key, [minimum, maximum]]) => {
+    if (Number.isFinite(row[key])) row[key] = clamp(Math.round(row[key]), minimum, maximum);
   });
   if (["solid", "dashed", "dotted"].includes(safeInput.strokeStyle)) row.strokeStyle = safeInput.strokeStyle;
   if (typeof safeInput.id === "string" && safeInput.id.length > 0) row.id = safeInput.id;
@@ -134,9 +112,9 @@ function normalizePreset(input) {
   const page = {
     paperId: PAPER_SIZES.some((paper) => paper.id === sourcePage.paperId) ? sourcePage.paperId : DEFAULT_PAGE.paperId,
     orientation: ["portrait", "landscape"].includes(sourcePage.orientation) ? sourcePage.orientation : DEFAULT_PAGE.orientation,
-    margin: Number.isFinite(sourcePage.margin) ? clamp(sourcePage.margin, 5, 30) : DEFAULT_PAGE.margin,
+    margin: Number.isFinite(sourcePage.margin) ? sourcePage.margin : DEFAULT_PAGE.margin,
     spaceVertical: sourcePage.spaceVertical !== false,
-    rowGap: Number.isFinite(sourcePage.rowGap) ? clamp(sourcePage.rowGap, 0, 50) : DEFAULT_PAGE.rowGap,
+    rowGap: Number.isFinite(sourcePage.rowGap) ? sourcePage.rowGap : DEFAULT_PAGE.rowGap,
   };
 
   return {
@@ -181,22 +159,27 @@ function paperDimensions(page) {
     : { width: paper.height, height: paper.width, label: paper.label };
 }
 
+function outerLayerRadius(row) {
+  return Math.max(Math.abs(row.radius), Math.abs(row.radius) - row.layerGap * (row.layers - 1));
+}
+
 function elementWidth(row) {
   switch (row.type) {
     case "line":
     case "wave":
-      return row.length;
+      return Math.abs(row.length);
     case "circle":
-      return row.radius * 2;
+      return outerLayerRadius(row) * 2;
     case "oval":
-      return row.radius * 2 * row.stretch;
+      return outerLayerRadius(row) * Math.abs(row.stretch) * 2;
     case "square":
-      return row.side;
+      return Math.abs(row.side);
     case "polygon":
+      return Math.abs(row.radius) * 2;
     case "star":
-      return row.radius * 2;
+      return Math.abs(row.radius) * Math.max(1, Math.abs(row.innerRatio)) * 2;
     case "heart":
-      return row.size;
+      return Math.abs(row.size);
     default:
       return 20;
   }
@@ -205,20 +188,21 @@ function elementWidth(row) {
 function elementHeight(row) {
   switch (row.type) {
     case "line":
-      return row.thickness;
+      return Math.abs(row.thickness);
     case "circle":
-      return row.radius * 2;
+      return outerLayerRadius(row) * 2;
     case "oval":
-      return row.radius * 2;
+      return outerLayerRadius(row) * 2;
     case "wave":
-      return row.amplitude * 2;
+      return Math.abs(row.amplitude) * 2;
     case "square":
-      return row.side;
+      return Math.abs(row.side);
     case "polygon":
+      return Math.abs(row.radius) * 2;
     case "star":
-      return row.radius * 2;
+      return Math.abs(row.radius) * Math.max(1, Math.abs(row.innerRatio)) * 2;
     case "heart":
-      return row.size * 0.88;
+      return Math.abs(row.size) * 0.88;
     default:
       return 20;
   }
@@ -227,27 +211,27 @@ function elementHeight(row) {
 function horizontalFootprint(row) {
   const width = elementWidth(row);
   const height = elementHeight(row);
-  if (["circle", "polygon", "star"].includes(row.type)) return Math.max(width, height) + row.thickness;
+  if (["circle", "polygon", "star"].includes(row.type)) return Math.max(width, height) + Math.abs(row.thickness);
   let widest = 0;
   for (let index = 0; index < 360; index += 1) {
     const angle = ((row.rotation + row.rotationOffset * index) * Math.PI) / 180;
     const projectedWidth = Math.abs(width * Math.cos(angle)) + Math.abs(height * Math.sin(angle));
     widest = Math.max(widest, projectedWidth);
   }
-  return widest + row.thickness;
+  return widest + Math.abs(row.thickness);
 }
 
 function verticalFootprint(row, count) {
   const width = elementWidth(row);
   const height = elementHeight(row);
-  if (["circle", "polygon", "star"].includes(row.type)) return Math.max(width, height) + row.thickness;
+  if (["circle", "polygon", "star"].includes(row.type)) return Math.max(width, height) + Math.abs(row.thickness);
   let tallest = 0;
   for (let index = 0; index < Math.max(1, count); index += 1) {
     const angle = ((row.rotation + row.rotationOffset * index) * Math.PI) / 180;
     const projectedHeight = Math.abs(width * Math.sin(angle)) + Math.abs(height * Math.cos(angle));
     tallest = Math.max(tallest, projectedHeight);
   }
-  return tallest + row.thickness;
+  return tallest + Math.abs(row.thickness);
 }
 
 function repeatStride(row) {
@@ -256,6 +240,7 @@ function repeatStride(row) {
 }
 
 function repeatCount(row, availableWidth) {
+  if (availableWidth <= 0) return 0;
   const shapeWidth = horizontalFootprint(row);
   const stride = repeatStride(row);
   return clamp(Math.floor((availableWidth - shapeWidth) / stride) + 1, 1, MAX_REPEATS);
@@ -273,6 +258,7 @@ function dotSpacing(pathLength, width) {
 }
 
 function strokeProps(row, width = row.thickness, pathLength) {
+  width = Math.abs(width);
   const dash = row.strokeStyle === "dashed"
     ? `${width * 5} ${width * 3}`
     : row.strokeStyle === "dotted"
@@ -291,14 +277,15 @@ function strokeProps(row, width = row.thickness, pathLength) {
 }
 
 function arcPath(rx, ry, angle) {
-  const safeAngle = clamp(angle, 1, 359.8);
-  const start = -90 - safeAngle / 2;
-  const end = -90 + safeAngle / 2;
+  const safeAngle = clamp(Math.abs(angle), 0, 359.8);
+  const direction = angle < 0 ? -1 : 1;
+  const start = -90 - direction * safeAngle / 2;
+  const end = -90 + direction * safeAngle / 2;
   const radians = (degrees) => (degrees * Math.PI) / 180;
   const startPoint = [Math.cos(radians(start)) * rx, Math.sin(radians(start)) * ry];
   const endPoint = [Math.cos(radians(end)) * rx, Math.sin(radians(end)) * ry];
   const largeArc = safeAngle > 180 ? 1 : 0;
-  return `M ${startPoint[0]} ${startPoint[1]} A ${rx} ${ry} 0 ${largeArc} 1 ${endPoint[0]} ${endPoint[1]}`;
+  return `M ${startPoint[0]} ${startPoint[1]} A ${rx} ${ry} 0 ${largeArc} ${angle < 0 ? 0 : 1} ${endPoint[0]} ${endPoint[1]}`;
 }
 
 function regularPolygonVertices(sides, outerRadius, innerRadius = null) {
@@ -329,8 +316,9 @@ function ellipseCircumference(rx, ry) {
 }
 
 function ellipseArcLength(rx, ry, angle) {
+  angle = Math.abs(angle);
   if (angle >= 359.8) return ellipseCircumference(rx, ry);
-  const safeAngle = clamp(angle, 1, 359.8);
+  const safeAngle = clamp(angle, 0, 359.8);
   const samples = Math.max(36, Math.ceil(safeAngle / 2));
   const start = (-90 - safeAngle / 2) * (Math.PI / 180);
   const span = safeAngle * (Math.PI / 180);
@@ -346,7 +334,7 @@ function ellipseArcLength(rx, ry, angle) {
 }
 
 function waveData(length, amplitude, frequency) {
-  const samples = Math.max(240, Math.ceil(Math.abs(frequency) * 96));
+  const samples = clamp(Math.ceil(Math.abs(frequency) * 96), 240, 8192);
   let pathLength = 0;
   let previous = null;
   const d = Array.from({ length: samples + 1 }, (_, index) => {
@@ -362,16 +350,16 @@ function waveData(length, amplitude, frequency) {
 
 function LayeredArc({ row, oval = false }) {
   return Array.from({ length: row.layers }, (_, index) => {
-    const layerRadius = row.radius - row.layerGap * index;
+    const layerRadius = Math.abs(row.radius) - row.layerGap * index;
     if (layerRadius <= 0.7) return null;
-    const rx = oval ? layerRadius * row.stretch : layerRadius;
+    const rx = oval ? Math.abs(layerRadius * row.stretch) : layerRadius;
     const ry = layerRadius;
     const props = strokeProps(
       row,
       index === 0 ? row.thickness : row.innerThickness,
       ellipseArcLength(rx, ry, row.arcAngle),
     );
-    if (row.arcAngle >= 359.8) {
+    if (Math.abs(row.arcAngle) >= 359.8) {
       return oval
         ? <ellipse key={index} cx="0" cy="0" rx={rx} ry={ry} {...props} />
         : <circle key={index} cx="0" cy="0" r={layerRadius} {...props} />;
@@ -386,7 +374,7 @@ function ElementShape({ row, index, x, y }) {
 
   switch (row.type) {
     case "line":
-      shape = <line x1={-row.length / 2} y1="0" x2={row.length / 2} y2="0" {...strokeProps(row, row.thickness, row.length)} />;
+      shape = <line x1={-row.length / 2} y1="0" x2={row.length / 2} y2="0" {...strokeProps(row, row.thickness, Math.abs(row.length))} />;
       break;
     case "circle":
       shape = <LayeredArc row={row} />;
@@ -400,7 +388,7 @@ function ElementShape({ row, index, x, y }) {
       break;
     }
     case "square":
-      shape = <rect x={-row.side / 2} y={-row.side / 2} width={row.side} height={row.side} {...strokeProps(row, row.thickness, row.side * 4)} />;
+      shape = <rect x={-Math.abs(row.side) / 2} y={-Math.abs(row.side) / 2} width={Math.abs(row.side)} height={Math.abs(row.side)} {...strokeProps(row, row.thickness, Math.abs(row.side) * 4)} />;
       break;
     case "polygon":
       shape = <polygon points={regularPolygonPoints(row.sides, row.radius)} {...strokeProps(row, row.thickness, closedPathLength(regularPolygonVertices(row.sides, row.radius)))} />;
@@ -429,8 +417,8 @@ function ElementShape({ row, index, x, y }) {
 
 function SheetPreview({ page, rows, svgRef }) {
   const { width, height, label } = paperDimensions(page);
-  const innerWidth = width - page.margin * 2;
-  const innerHeight = height - page.margin * 2;
+  const innerWidth = Math.max(0, width - page.margin * 2);
+  const innerHeight = Math.max(0, height - page.margin * 2);
   const manualRowGap = Number.isFinite(page.rowGap) ? page.rowGap : DEFAULT_PAGE.rowGap;
   const layouts = rows.map((row) => {
     const count = repeatCount(row, innerWidth);
@@ -486,38 +474,47 @@ function SheetPreview({ page, rows, svgRef }) {
   );
 }
 
-function RangeField({ label, value, unit = "", min, max, step = 1, onChange }) {
+function RangeField({ label, value, unit = "", min, max, step = 1, inputMin, inputMax, integer = false, onChange }) {
   return (
-    <label className="range-field">
-      <span className="field-label"><span>{label}</span><output>{value}{unit}</output></span>
+    <div className="range-field">
+      <NumberField label={label} value={value} unit={unit.trim()} min={min} max={max} step={step} inputMin={inputMin} inputMax={inputMax} integer={integer} onChange={onChange} />
       <input
         type="range"
+        aria-label={`${label} slider`}
         min={min}
         max={max}
         step={step}
-        value={value}
+        value={clamp(value, min, max)}
         onChange={(event) => onChange(Number(event.target.value))}
       />
-    </label>
+    </div>
   );
 }
 
-function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) {
+function NumberField({ label, value, unit = "", min, max, step = 1, inputMin = -Infinity, inputMax = Infinity, integer = false, onChange }) {
   const inputId = useId();
   const [isAdjusting, setIsAdjusting] = useState(false);
-  const [usesCoarsePointer, setUsesCoarsePointer] = useState(() => (
-    typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches
-  ));
+  const [draft, setDraft] = useState(String(value));
+  const editingRef = useRef(false);
   const dragRef = useRef(null);
 
   useEffect(() => {
-    const query = window.matchMedia?.("(pointer: coarse)");
-    if (!query) return undefined;
-    const updatePointerMode = () => setUsesCoarsePointer(query.matches);
-    updatePointerMode();
-    query.addEventListener("change", updatePointerMode);
-    return () => query.removeEventListener("change", updatePointerMode);
-  }, []);
+    if (!editingRef.current) setDraft(String(value));
+  }, [value]);
+
+  const parsedDraft = (text) => {
+    if (!text.trim()) return null;
+    const next = Number(text);
+    if (!Number.isFinite(next)) return null;
+    return clamp(integer ? Math.round(next) : next, inputMin, inputMax);
+  };
+
+  const finishEditing = () => {
+    editingRef.current = false;
+    const next = parsedDraft(draft);
+    if (next !== null) onChange(next);
+    setDraft(String(next ?? value));
+  };
 
   const startAdjust = (event) => {
     event.preventDefault();
@@ -531,10 +528,17 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     event.preventDefault();
-    const raw = drag.startValue + ((drag.startY - event.clientY) / 2.4) * step;
-    const decimals = Math.max(0, (String(step).split(".")[1] || "").length);
-    const stepped = Math.round(raw / step) * step;
-    onChange(clamp(Number(stepped.toFixed(decimals)), min, max));
+    const delta = Math.round((drag.startY - event.clientY) / 2.4) * step;
+    const raw = drag.startValue + delta;
+    const decimalPlaces = (number) => {
+      const [coefficient, exponent = "0"] = String(number).split("e");
+      return Math.max(0, (coefficient.split(".")[1] || "").length - Number(exponent));
+    };
+    const decimals = Math.min(100, Math.max(decimalPlaces(step), decimalPlaces(drag.startValue)));
+    // A value typed outside the slider range must not jump back on the first drag.
+    const lower = Math.max(inputMin, drag.startValue < min ? -Infinity : min);
+    const upper = Math.min(inputMax, drag.startValue > max ? Infinity : max);
+    onChange(clamp(Number(raw.toFixed(decimals)), lower, upper));
   };
 
   const stopAdjust = (event) => {
@@ -551,18 +555,28 @@ function NumberField({ label, value, unit = "", min, max, step = 1, onChange }) 
       <span className={`number-input-wrap ${isAdjusting ? "adjusting" : ""}`}>
         <input
           id={inputId}
-          type="number"
-          value={value}
-          min={min}
-          max={max}
-          step={step}
-          readOnly={usesCoarsePointer}
-          inputMode={usesCoarsePointer ? "none" : "decimal"}
+          type="text"
+          className="numeric-input"
+          value={draft}
+          inputMode="text"
+          autoComplete="off"
+          spellCheck={false}
+          onFocus={() => { editingRef.current = true; }}
           onChange={(event) => {
-            const next = Number(event.target.value);
-            if (Number.isFinite(next)) onChange(clamp(next, min, max));
+            const text = event.target.value;
+            setDraft(text);
+            const next = parsedDraft(text);
+            if (next !== null) onChange(next);
           }}
-          title={usesCoarsePointer ? "Use the adjacent adjust button: drag up to increase or down to decrease." : "Type a value, or use the adjacent adjust button."}
+          onBlur={finishEditing}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+            if (event.key === "Escape") {
+              setDraft(String(value));
+              event.currentTarget.blur();
+            }
+          }}
+          title={integer ? `Type a whole-number count from ${inputMin} to ${inputMax}, or use the adjacent adjust button.` : "Type a value, including negative values, or use the adjacent adjust button. Slider limits only apply when dragging."}
         />
         {unit && <em>{unit}</em>}
         <button
@@ -603,7 +617,7 @@ function ShapeControls({ row, update }) {
           <RangeField label="Outer radius" value={row.radius} unit=" mm" min={3} max={30} step={0.5} onChange={(radius) => update({ radius })} />
           {row.type === "oval" && <RangeField label="Width ratio" value={row.stretch} unit="×" min={0.6} max={2.5} step={0.05} onChange={(stretch) => update({ stretch })} />}
           <RangeField label="Arc angle" value={row.arcAngle} unit="°" min={15} max={360} step={5} onChange={(arcAngle) => update({ arcAngle })} />
-          <RangeField label="Circle layers" value={row.layers} min={1} max={6} onChange={(layers) => update({ layers })} />
+          <RangeField label="Circle layers" value={row.layers} min={1} max={6} inputMin={1} inputMax={12} integer onChange={(layers) => update({ layers })} />
           {row.layers > 1 && (
             <div className="two-column">
               <NumberField label="Layer gap" value={row.layerGap} unit="mm" min={0.5} max={8} step={0.1} onChange={(layerGap) => update({ layerGap })} />
@@ -626,7 +640,7 @@ function ShapeControls({ row, update }) {
       return (
         <>
           <RangeField label="Outer radius" value={row.radius} unit=" mm" min={3} max={28} step={0.5} onChange={(radius) => update({ radius })} />
-          <RangeField label="Polygon sides" value={row.sides} min={3} max={12} onChange={(sides) => update({ sides })} />
+          <RangeField label="Polygon sides" value={row.sides} min={3} max={12} inputMin={3} inputMax={24} integer onChange={(sides) => update({ sides })} />
         </>
       );
     case "heart":
@@ -635,8 +649,8 @@ function ShapeControls({ row, update }) {
       return (
         <>
           <RangeField label="Outer radius" value={row.radius} unit=" mm" min={3} max={28} step={0.5} onChange={(radius) => update({ radius })} />
-          <RangeField label="Star points" value={row.points} min={3} max={12} onChange={(points) => update({ points })} />
-          <RangeField label="Inner radius" value={Math.round(row.innerRatio * 100)} unit="%" min={20} max={80} step={2} onChange={(value) => update({ innerRatio: value / 100 })} />
+          <RangeField label="Star points" value={row.points} min={3} max={12} inputMin={3} inputMax={24} integer onChange={(points) => update({ points })} />
+          <RangeField label="Inner radius" value={row.innerRatio * 100} unit="%" min={20} max={80} step={2} onChange={(value) => update({ innerRatio: value / 100 })} />
         </>
       );
     default:
@@ -730,7 +744,7 @@ export default function App() {
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) ?? rows[0], [rows, selectedId]);
   const dimensions = paperDimensions(page);
   const pageRowGap = Number.isFinite(page.rowGap) ? page.rowGap : DEFAULT_PAGE.rowGap;
-  const printableWidth = dimensions.width - page.margin * 2;
+  const printableWidth = Math.max(0, dimensions.width - page.margin * 2);
   const pixelWidth = Math.round((dimensions.width / 25.4) * dpi);
   const pixelHeight = Math.round((dimensions.height / 25.4) * dpi);
 
@@ -951,9 +965,9 @@ export default function App() {
           properties: {
             paperId: { type: "string", enum: PAPER_SIZES.map((item) => item.id) },
             orientation: { type: "string", enum: ["portrait", "landscape"] },
-            margin: { type: "number", minimum: 5, maximum: 30 },
+            margin: { type: "number" },
             spaceVertical: { type: "boolean" },
-            rowGap: { type: "number", minimum: 0, maximum: 50 },
+            rowGap: { type: "number" },
           },
           additionalProperties: false,
         },
@@ -971,7 +985,7 @@ export default function App() {
             next.orientation = input.orientation;
           }
           if (input.margin !== undefined) {
-            if (typeof input.margin !== "number" || input.margin < 5 || input.margin > 30) throw new Error("Margin must be between 5 and 30 mm.");
+            if (!Number.isFinite(input.margin)) throw new Error("Margin must be a finite number.");
             next.margin = input.margin;
           }
           if (input.spaceVertical !== undefined) {
@@ -979,7 +993,7 @@ export default function App() {
             next.spaceVertical = input.spaceVertical;
           }
           if (input.rowGap !== undefined) {
-            if (typeof input.rowGap !== "number" || input.rowGap < 0 || input.rowGap > 50) throw new Error("Row gap must be between 0 and 50 mm.");
+            if (!Number.isFinite(input.rowGap)) throw new Error("Row gap must be a finite number.");
             next.rowGap = input.rowGap;
           }
           appStateRef.current = { ...appStateRef.current, page: next };
@@ -1121,7 +1135,7 @@ export default function App() {
         </section>
 
         {selected && (
-          <section className="panel-section editor-section">
+          <section key={selected.id} className="panel-section editor-section">
             <div className="section-title"><span>03</span><h2>Edit row</h2><b className="row-index">{String(rows.findIndex((row) => row.id === selected.id) + 1).padStart(2, "0")}</b></div>
             <SelectField label="Element type" value={selected.type} onChange={changeRowType}>
               {ELEMENT_TYPES.map((type) => <option key={type.id} value={type.id}>{type.label}</option>)}

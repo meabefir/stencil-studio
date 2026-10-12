@@ -12,7 +12,7 @@ Stencil Studio is a browser-based tattoo line-work sheet builder. It runs entire
 - Per-element rotation, progressive rotation offset, and a per-row overlap offset for tighter or wider packing
 - Automatic, even repeat spacing inside the printable width, with compact row stacking when vertical spacing is disabled
 - Drag, arrow-button, duplicate, and delete row actions
-- Fine adjustment for numeric controls: hover a number for half a second, then hold and drag horizontally
+- Editable number boxes for every slider, plus dedicated vertical drag buttons that work with a mouse, touch, or pen
 - Automatic browser-local saving, named local presets, and compatible JSON preset download/import
 - PNG and JPEG export at 150, 300, or 600 DPI
 - Responsive layout for desktop and mobile browsers
@@ -42,7 +42,9 @@ Browser-local saves do not leave the device and are specific to the site's addre
 
 ## Fine-adjusting values
 
-Numeric fields can still be clicked and typed normally. For precise mouse adjustment, hover over a numeric input for half a second, then hold and drag horizontally. The deliberately low sensitivity makes small thickness, overlap, and rotation changes easier to control.
+Tap or click a number box to type an exact value. Typed sizes are not capped by the slider's range and can include negative numbers, decimals, or scientific notation. These values are preserved by autosave and JSON presets. Dimensions that require a nonnegative SVG size (such as circle radii, square sides, and stroke widths) use the magnitude of a negative value. Negative offsets and gaps move or pack elements in the opposite direction. Circle layers remain whole-number counts from 1 to 12; polygon sides and star points remain whole-number counts from 3 to 24.
+
+Use a slider for its usual range, or press the adjacent ↕ button and drag up to increase or down to decrease. The drag button does not open the keyboard on phones and tablets. If you typed a value outside the usual range, dragging starts from that value without snapping back to the slider limit.
 
 ## Publish with GitHub Pages
 
